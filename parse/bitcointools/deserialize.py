@@ -291,7 +291,7 @@ def match_decoded(decoded, to_match):
 def extract_public_key(bytes, version='\x00'):
   try:
     decoded = [ x for x in script_GetOp(bytes) ]
-  except struct.error:
+  except (IndexError, struct.error):
     return "(None)"
 
   # non-generated TxIn transactions push a signature

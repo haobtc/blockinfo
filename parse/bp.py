@@ -7,7 +7,7 @@ import mmap
 from hashlib import sha256
 from bitcointools.deserialize import decode_script, extract_public_key
 from bitcointools.deserialize import extract_public_key_and_address
-from mongodb_store import save_block, get_last_pos, init_connect
+from mongodb_store import save_block, get_last_pos, init_connect, update_inputs
 
 def dhash(v):
     a = sha256(v).digest()
@@ -95,11 +95,15 @@ class ParserContext(object):
             '.%s/blocks/blk%05d.dat' % (self.__coin__, self.dataIndex))
 
     def ahead(self, cntBytes):
-        if self.pos + cntBytes >= self.fileSize:
+        if self.pos + cntBytes > self.fileSize:
+            print 'exc on ahead', self.pos, cntBytes, self.fileSize
             raise EndOfData()
         data = self.mm[self.pos:self.pos + cntBytes]
         self.pos += cntBytes
         return data
+        
+    def avail(self):
+        return self.fileSize - self.pos
 
     def parseVarInt(self):
         c = ord(self.ahead(1))
@@ -137,6 +141,7 @@ class ParserContext(object):
                 try:
                     yield self.parseBlock()
                 except EndOfData:
+                    print 'endof data', self.pos
                     self.pos = blockOffset
                     break
 
@@ -179,7 +184,6 @@ class ParserContext(object):
         tx.hash = dhash(d)
         #printd.encode('hex_codec'), repr(tx.hash), startPos, self.pos, lockTime,
         tx.hash = tohex(tx.hash)
-        #print 'tx', tx.hash
         return tx
 
     def parseBlock(self):
@@ -190,8 +194,10 @@ class ParserContext(object):
         data = self.ahead(8)
         magic, b.size = unpack('II', data)
         if magic != self.__magic__:
+            print 'magic diff'
             raise EndOfData()
         if  b.size <= 80:
+            print 'size', b.size
             raise EndOfData()
 
         b.hash = tohex(dhash(self.mm[self.pos:self.pos+80]))
@@ -220,11 +226,10 @@ class DTCParserContext(ParserContext):
 
 def main(coin):
     init_connect(coin)
-    height = 0
     ContextClasses = [ParserContext, LTCParserContext, DTCParserContext]
     ContextClass = [cls for cls in ContextClasses if cls.__coin__ == coin][0]
-    file_id, file_pos = get_last_pos(ContextClass.__coin__)
-    print 'last position', file_id, file_pos
+    file_id, file_pos, height = get_last_pos(ContextClass.__coin__)
+    print 'last position', file_id, file_pos, height
 
     for i in xrange(file_id, file_id + 200):
         context = ContextClass(i, height=height)
@@ -232,16 +237,16 @@ def main(coin):
         file_pos = 0
         if not os.path.exists(context.fileName):
             break
-        print time.strftime('%Y-%m-%d %H:%M:%S'), context.fileName, height
+        print time.strftime('%Y-%m-%d %H:%M:%S'), context.fileName
         try:
             for b in context.parseBlocks(offset=offset):
-                height += 1
                 b.height = height
+                height += 1
                 save_block(context.__coin__, b)
+                update_inputs(context.__coin__)
         except:
             import traceback
             traceback.print_exc()
-            print 'height', height
             raise
 
 if __name__ == '__main__':
