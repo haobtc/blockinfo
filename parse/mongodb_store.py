@@ -1,3 +1,4 @@
+import time
 from pymongo import Connection, DESCENDING
 from bson.binary import Binary
 import sys
@@ -9,7 +10,7 @@ def dbconn(coin, reconnect=False):
             print 'reconnect database'
         conn = Connection('localhost', 27017, tz_aware=True)
         _conn_pool[coin] = conn
-    return _conn_pool[coin]['blockinfo_%s' % coin]
+    return _conn_pool[coin]['info_%s' % coin]
     
 def init_connect(coin):
     db = dbconn(coin)
@@ -73,9 +74,9 @@ def save_tx(coin, tx, blockId, block_index):
                 } for output in tx.outputs],
         }
 
-    col.save(txdict)
+    col.insert(txdict)
 
-def each_tx(coin, iter_name, limit=-1):
+def each_tx(coin, iter_name, limit=-1, c=1):
     db = dbconn(coin)
     col = db['iterCursor']
     r = col.find_one({'name': iter_name})
@@ -84,6 +85,7 @@ def each_tx(coin, iter_name, limit=-1):
         last_objid = r['objid']
     txcol = db['tx']
     times = 0
+    t = 0
     try:
         while True:
             if last_objid:
@@ -94,20 +96,29 @@ def each_tx(coin, iter_name, limit=-1):
             if not tx:
                 break
             last_objid = tx['_id']
-            col.update({'name': iter_name},
-                       {'$set': {'objid':last_objid}},
-                       upsert=True)
+            t += 1
+            if t >= c:
+                t = 0
+                col.update({'name': iter_name},
+                           {'$set': {'objid':last_objid}},
+                           upsert=True)
             yield tx
             times += 1
             if limit >= 0 and times >= limit:
                 break
+
+        col.update({'name': iter_name},
+                   {'$set': {'objid':last_objid}},
+                   upsert=True)
     finally:
         pass
 
-def update_inputs(coin):
+def update_inputs(coin, update_spent=False):
     txcol = dbconn(coin)['tx']
     find_times = 0
-    for i, tx in enumerate(each_tx('bitcoin', 'input')):
+    for i, tx in enumerate(each_tx('bitcoin', 'input', c=100)):
+        if i % 10000 == 0:
+            print time.strftime('%H:%M:%S'), i
         for input in tx['inputs']:
             tx_hash = input['output_tx_hash']
             output_index = input['output_index']
@@ -120,10 +131,22 @@ def update_inputs(coin):
                     src_output['spent'] = True
                     input['value'] = src_output['value']
                     input['address'] = src_output['address']
+                    if update_spent and not src_output.get('spent'):
+                        src_output['spent'] = True
+                        txcol.save(srctx)
                 else:
                     print 'cannot find input tx %s for %s' % (tx_hash, tx['hash'])
-                    
         txcol.save(tx)
+
+def update_spent(coin):
+    ucol = dbconn(coin)['spent']
+    txcol = dbconn(coin)['tx']
+    for tx in each_tx(coin, 'spent', limit=-1):
+        spent = ucol.find_one({'_id': tx['hash']})
+        if spent:
+            for k in spent['value'].iterkeys():
+                tx['outputs'][int(k)]['spent'] = True
+            txcol.save(tx)
 
 def test():
     init_connect('bitcoin')
@@ -134,6 +157,4 @@ def test():
     print i
 
 if __name__ == '__main__':
-    update_inputs('bitcoin')
-        
-    
+    update_spent('bitcoin')

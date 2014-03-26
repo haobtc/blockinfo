@@ -174,7 +174,8 @@ class ParserContext(object):
     def parseTx(self):
         startPos = self.pos
         (version,) = unpack('I', self.ahead(4))
-        assert version in (1, 2), 'version is different %s' % version
+        if version not in (1, 2):
+            print >>sys.stderr, 'version is different %s' % version
         
         tx = Tx()
         tx.inputs = self.parseInputs() 
@@ -243,7 +244,7 @@ def main(coin):
                 b.height = height
                 height += 1
                 save_block(context.__coin__, b)
-                update_inputs(context.__coin__)
+                #update_inputs(context.__coin__)
         except:
             import traceback
             traceback.print_exc()
@@ -251,7 +252,7 @@ def main(coin):
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        coin = bitcoin
+        coin = 'bitcoin'
     else:
         coin = sys.argv[1]
     main(coin)
