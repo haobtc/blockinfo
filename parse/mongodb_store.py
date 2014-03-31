@@ -113,30 +113,48 @@ def each_tx(coin, iter_name, limit=-1, c=1):
     finally:
         pass
 
+def bulk_txes(txcol, tx_hash_list):
+    txes = {}
+    for tx in txcol.find({'hash': {'$in': tx_hash_list}}):
+        txes[tx['hash']] = tx
+    return txes
+
+def is_valid_hash(tx_hash):
+    return tx_hash and tx_hash != '0000000000000000000000000000000000000000000000000000000000000000'
+
 def update_inputs(coin, update_spent=False):
     txcol = dbconn(coin)['tx']
-    find_times = 0
-    for i, tx in enumerate(each_tx('bitcoin', 'input', c=100)):
-        if i % 10000 == 0:
+
+    for i, tx in enumerate(each_tx(coin, 'input', c=100)):
+        if i % 1000 == 0:
             print time.strftime('%H:%M:%S'), i
+        s = time.time()
+        find_times = 0
+        txes = bulk_txes(
+            txcol, 
+            [input['output_tx_hash'] for input in tx['inputs']
+             if is_valid_hash(input['output_tx_hash'])])
+        
         for input in tx['inputs']:
             tx_hash = input['output_tx_hash']
             output_index = input['output_index']
-
-            if tx_hash and tx_hash != '0000000000000000000000000000000000000000000000000000000000000000':
+            if is_valid_hash(tx_hash):
                 find_times += 1
-                srctx = txcol.find_one({'hash': tx_hash})
+                #srctx = txcol.find_one({'hash': tx_hash})
+                srctx = txes.get(tx_hash)
                 if srctx and len(srctx['outputs']) > output_index:
                     src_output = srctx['outputs'][output_index]
-                    src_output['spent'] = True
                     input['value'] = src_output['value']
                     input['address'] = src_output['address']
-                    if update_spent and not src_output.get('spent'):
+                    if update_spent:
                         src_output['spent'] = True
                         txcol.save(srctx)
                 else:
                     print 'cannot find input tx %s for %s' % (tx_hash, tx['hash'])
         txcol.save(tx)
+        d = time.time() - s
+        if d > 0.3:
+            print 's', d, tx['hash'], find_times
 
 def update_spent(coin):
     ucol = dbconn(coin)['spent']

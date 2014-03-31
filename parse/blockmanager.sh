@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 coin=$1
 
@@ -15,8 +15,9 @@ case "$1" in
 	;;
 esac
 
+
 function update_input {
-    python -c "import mongodb_store; mongodb_store.update_inputs('$coin')"
+    python -c "import mongodb_store; mongodb_store.update_inputs('$coin', update_spent=False)"
 }
 
 function update_spent {
