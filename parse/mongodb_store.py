@@ -85,33 +85,32 @@ def each_tx(coin, iter_name, limit=-1, c=1):
         last_objid = r['objid']
     txcol = db['tx']
     times = 0
-    t = 0
-    try:
-        while True:
-            if last_objid:
-                params = {'_id': {'$gt': last_objid}}
-                tx = txcol.find_one(params)
-            else:
-                tx = txcol.find_one()
-            if not tx:
-                break
+    cont = True
+
+    while cont:
+        saved = False
+        if last_objid:
+            params = {'_id': {'$gt': last_objid}}
+        else:
+            params = None
+                
+        for tx in txcol.find(spec=params, limit=c):
             last_objid = tx['_id']
-            t += 1
-            if t >= c:
-                t = 0
-                col.update({'name': iter_name},
-                           {'$set': {'objid':last_objid}},
-                           upsert=True)
             yield tx
             times += 1
             if limit >= 0 and times >= limit:
+                cont = False
                 break
 
         col.update({'name': iter_name},
                    {'$set': {'objid':last_objid}},
                    upsert=True)
-    finally:
-        pass
+        saved = True
+        
+    if last_objid and not saved:
+        col.update({'name': iter_name},
+                   {'$set': {'objid':last_objid}},
+                   upsert=True)
 
 def bulk_txes(txcol, tx_hash_list):
     txes = {}
@@ -146,7 +145,7 @@ def update_inputs(coin, update_spent=False):
                     src_output = srctx['outputs'][output_index]
                     input['value'] = src_output['value']
                     input['address'] = src_output['address']
-                    if update_spent:
+                    if update_spent and not src_output.get('spent'):
                         src_output['spent'] = True
                         txcol.save(srctx)
                 else:
