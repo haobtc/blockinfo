@@ -70,7 +70,13 @@ app.get('/unspent', function(req, res){
 	var d = Defer();
 	s.store.getUnspent(s.arr, function(err, outputs) {
 	    outputs = outputs || [];
-	    d.avail.apply(null, outputs);
+	    s.store.getMempool(s.arr, function(err, outputsInMemPool) {
+		// FIXME: handle err
+		outputsInMemPool.forEach(function(tx) {
+		    outputs.push(tx);
+		});
+		d.avail.apply(null, outputs);
+	    });
 	});
 	return d;
     }

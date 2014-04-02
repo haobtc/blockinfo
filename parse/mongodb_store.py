@@ -1,7 +1,11 @@
+import sys
 import time
+import socket
+
 from pymongo import Connection, DESCENDING
 from bson.binary import Binary
-import sys
+
+from rpc import coinrpc
 
 _conn_pool = {}
 def dbconn(coin, reconnect=False):
@@ -27,6 +31,10 @@ def init_connect(coin):
 
     col = db['iterCursor']
     col.ensure_index('name', unique=True)
+
+    col = db['mempool']
+    col.ensure_index('txid', unique=True)
+    col.ensure_index('vout.scriptPubKey.addresses')
 
 def get_last_pos(coin):
     db = dbconn(coin)
@@ -75,6 +83,9 @@ def save_tx(coin, tx, blockId, block_index):
         }
 
     col.insert(txdict)
+
+    mpcol = db['mempool']
+    mpcol.remove({'txid': tx.hash})
 
 def each_tx(coin, iter_name, limit=-1, c=1):
     db = dbconn(coin)
@@ -172,6 +183,35 @@ def test():
         i += 1
         print tx['hash']
     print i
+
+def import_mempool(coin):
+    txids = coinrpc(coin, 'getrawmempool')['result']
+    if not txids:
+        return
+    col = dbconn(coin)['mempool']
+    #print col.remove({'txid': {'$not': {'$in': txids}}})
+    existing_txids = {}
+    for tx in col.find({'txid': {'$in': txids}}):
+        existing_txids[tx['txid']] = 1
+
+    for i, txid in enumerate(txids):
+        if txid in existing_txids:
+            print 'ext', txid
+            continue
+
+        print 'get', txid
+        try:
+            rawtx = coinrpc(coin, 'getrawtransaction', txid)['result']
+            print 'rawtx length', len(rawtx)
+            time.sleep(1)
+
+            tx = coinrpc(coin, 'decoderawtransaction', rawtx)['result']
+        except socket.timeout:
+            print 'timeout'
+            break
+        if tx:
+            col.insert(tx)
+        time.sleep(3)
 
 if __name__ == '__main__':
     update_spent('bitcoin')

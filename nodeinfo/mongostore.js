@@ -99,6 +99,51 @@ function Store(coin) {
 	});
     };
 
+    store.getMempool = function(addressList, callback) {
+	var query = {};
+	if(typeof addressList == 'string') {
+	    query = {"vout.scriptPubKey.addresses": addressList};
+	} else if (addressList.length == 1) {
+	    query = {"vout.scriptPubKey.addresses": addressList[0]};
+	} else if(addressList.length == 0) {
+	    callback(undefined, []);
+	    return;
+	} else {
+	    query = {"vout.scriptPubKey.addresses": {$in: addressList}};
+	}
+	var addrDict = {};
+	addressList.forEach(function(addr) {
+	    addrDict[addr] = true;
+	});
+
+	var col = conn.collection('mempool');
+	col.find(query).toArray(function(err, arr) {
+	    if(err) {
+		callbvack(err, undefined);
+		return;
+	    }
+	    var outputs = [];
+	    arr.forEach(function(tx){
+		tx.vout.forEach(function(output) {
+		    var scriptPubKey = output.scriptPubKey;
+		    scriptPubKey.forEach(function(address) {
+			if(addrDict[address]) {
+			    var obj = {
+				address: address,
+				vout:scriptPubKey.n,
+				amount: output.value,
+				scriptPubKey: scriptPubKey.hex,
+				txid: tx.txid
+			    };
+			    outputs.push(obj);
+			}
+		    });
+		});
+	    });
+	    callback(undefined, outputs);
+	});
+    };
+
     store.getUnspent = function(addressList, callback) {
 	var query = {};
 	if(typeof addressList == 'string') {
@@ -112,7 +157,6 @@ function Store(coin) {
 	    query = {"outputs.address": {$in: addressList}};
 	}
 	var col = conn.collection('tx');
-	var query = 
 	col.find(query).toArray(function(err, arr) {
 	    if(err) {
 		callback(err, undefined);

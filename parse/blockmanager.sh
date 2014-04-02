@@ -15,6 +15,9 @@ case "$1" in
 	;;
 esac
 
+function import_mempool {
+    python -c "import mongodb_store; mongodb_store.import_mempool('$coin')"
+}
 
 function update_input {
     python -c "import mongodb_store; mongodb_store.update_inputs('$coin', update_spent=False)"
@@ -51,6 +54,9 @@ case "$2" in
     update_input)
 	update_input
 	;;
+    import_mempool)
+	import_mempool
+	;;
     update_spent)
 	update_spent
 	;;
@@ -64,6 +70,6 @@ case "$2" in
 	calc_balance
 	;;
     *)
-	echo Usage: $0 '<coin> [dbshell|parse|update_input|update_spent|calc_spent|calc_fee|calc_balance] args ...'
+	echo Usage: $0 '<coin> [dbshell|parse|import_mempool|update_input|update_spent|calc_spent|calc_fee|calc_balance] args ...'
 	;;    
 esac
