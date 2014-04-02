@@ -33,7 +33,30 @@ module.exports.getStoreByAddress = function(address) {
 	}
     }
     return null;
-}
+};
+
+module.exports.getStoreDict = function(addressList) {
+    var storeDict = {};
+    addressList.forEach(function(address) {
+	var lead = address.substr(0, 1);
+	for(var coin in coins) {
+	    var conf = coins[coin];
+	    if(lead == conf.leadingChar) {
+		var s = storeDict[coin];
+		if(s) {
+		    s.arr.push(address);
+		} else {
+		    storeDict[coin] = {
+			coin: coin,
+			arr: [address],
+			store: module.exports.stores[coin]
+		    }
+		}
+	    }
+	}
+    });
+    return storeDict;
+};
 
 
 function Store(coin) {
@@ -76,9 +99,21 @@ function Store(coin) {
 	});
     };
 
-    store.getUnspent = function(address, callback) {
+    store.getUnspent = function(addressList, callback) {
+	var query = {};
+	if(typeof addressList == 'string') {
+	    query = {"outputs.address": addressList};
+	} else if (addressList.length == 1) {
+	    query = {"outputs.address": addressList[0]};
+	} else if(addressList.length == 0) {
+	    callback(undefined, []);
+	    return;
+	} else {
+	    query = {"outputs.address": {$in: addressList}};
+	}
 	var col = conn.collection('tx');
-	col.find({"outputs.address": address}).toArray(function(err, arr) {
+	var query = 
+	col.find(query).toArray(function(err, arr) {
 	    if(err) {
 		callback(err, undefined);
 		return;
@@ -93,7 +128,7 @@ function Store(coin) {
 		arr.forEach(function(tx) {
 		    var block = blockObjs[tx.block_id.toString()];
 		    tx.outputs.forEach(function(output, index) {
-			if(output.address == address && !output.spent) {
+			if(!output.spent) {
 			    var obj = {
 				address: output.address,
 				vout: index,

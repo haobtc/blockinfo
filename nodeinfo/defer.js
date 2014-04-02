@@ -30,7 +30,9 @@ function Defer() {
         }
     };
 
-    defer.wait = function(childDefers) {
+    defer.wait = function(childDefers, opts) {
+	opts = opts || {};
+
         var counter = childDefers.length;
         var results = [];
         for (var i=0; i<counter; i++) {
@@ -47,7 +49,19 @@ function Defer() {
                     }
                     counter--;
                     if (counter == 0) {
-                        defer.avail.apply(null, results);
+			if(opts.flatten) {
+			    var flatResults = [];
+			    results.forEach(function(rs) {
+				if(rs) {
+				    rs.forEach(function(e) {
+					flatResults.push(e);
+				    });
+				}
+			    });
+			    defer.avail.call(null, flatResults);
+			} else {
+                            defer.avail.call(null, results);
+			}
                     }
                 });
             });
