@@ -51,6 +51,27 @@ module.exports.getStoreDict = function(addressList) {
 function Store(network) {
     var store = {};
     var conn;
+
+    function getBlocks(txList, callback) {
+	var block_ids = [];
+	txList.forEach(function(tx) {
+	    block_ids.push(tx.block_id);
+	});
+
+	var col = conn.collection('block');
+	col.find({_id: {$in: block_ids}}).toArray(function(err, blocks) {
+	    if(err) {
+		return callback(err, undefined);
+	    }
+	    var blockObjs = {};
+	    blocks.forEach(function(block) {
+		blockObjs[block._id] = block;
+	    });
+	    callback(undefined, blockObjs);
+	});
+    }
+
+
     store.connect = function() {
 	var url = "mongodb://localhost:27017/info_" + network;
 	MongoClient.connect(url, function(err, aConn) {
@@ -77,14 +98,59 @@ function Store(network) {
 	});
     };    
 
-    store.getTx = function(txHash, callback) {
+    store.getTx = function(hashList, callback) {
 	var col = conn.collection('tx');
-	col.find({hash: txHash}).toArray(function(err, arr) {
+	col.find({hash: {$in: hashList}}).toArray(function(err, arr) {
 	    if(err) {
 		callback(err, undefined);
 		return;
 	    }
-	    callback(undefined, arr.length > 0? arr[0]:undefined);	    
+	    getBlocks(arr, function(err, blockObjs) {
+		var txes = [];
+		arr.forEach(function(tx) {
+		    var block = blockObjs[tx.block_id.toString()];
+		    var nbObj = {
+			network: network,
+			txid: tx.hash,
+			blocktime: block.blk_time,
+			time: block.blk_time,
+			blockhash: block.hash,
+			blockindex: tx.block_index
+		    };
+		    var sumInput = 0;
+		    var sumOutput = 0;
+		    var inputs = [];
+		    var outputs = [];
+		    tx.inputs.forEach(function(input) {
+			if(input.address) {
+			    sumInput += input.value;
+			    inputs.push({
+				address:input.address,
+			        value:input.value/100000000,
+				vout: input.output_index,
+				txid: input.output_tx_hash
+			    });
+			}
+		    });
+		    tx.outputs.forEach(function(output) {
+			sumOutput += output.value;
+			outputs.push({
+			    address:output.address,
+			    value:output.value/100000000
+			});
+		    });
+		    nbObj.inputs = inputs;
+		    nbObj.outputs = outputs;
+		    nbObj.fee = (sumInput - sumOutput)/ 100000000;
+		    nbObj.amount = sumInput;
+		    if(latestBlock) {
+			nbObj.confirmations = latestBlock.height - block.height;
+		    }
+		    txes.push(nbObj);
+		});
+		callback(undefined, txes);
+	    });
+
 	});
     };
 
@@ -145,6 +211,11 @@ function Store(network) {
 	} else {
 	    query = {"outputs.address": {$in: addressList}};
 	}
+	var addrDict = {};
+	addressList.forEach(function(addr) {
+	    addrDict[addr] = true;
+	});
+
 	var col = conn.collection('tx');
 	col.find(query).toArray(function(err, arr) {
 	    if(err) {
@@ -152,22 +223,17 @@ function Store(network) {
 		return;
 	    }
 	    var outputs = [];
-	    var block_ids = [];
-	    arr.forEach(function(tx) {
-		block_ids.push(tx.block_id);
-	    });
-
-	    store.getBlocks(block_ids, function(err, blockObjs) {
+	    getBlocks(arr, function(err, blockObjs) {
 		arr.forEach(function(tx) {
 		    var block = blockObjs[tx.block_id.toString()];
 		    tx.outputs.forEach(function(output, index) {
-			if(!output.spent) {
+			if(addrDict[output.address] && !output.spent) {
 			    var obj = {
+				network: network,
 				address: output.address,
 				vout: index,
 				amount: output.value/100000000,
 				txid: tx.hash,
-
 				scriptPubkey: output.script.toString('hex')
 			    };
 			    if(latestBlock) {
@@ -180,20 +246,6 @@ function Store(network) {
 		callback(undefined, outputs);
 	    });
 	});	
-    };
-
-    store.getBlocks = function(block_ids, callback) {
-	var col = conn.collection('block');
-	col.find({_id: {$in: block_ids}}).toArray(function(err, blocks) {
-	    if(err) {
-		return callback(err, undefined);
-	    }
-	    var blockObjs = {};
-	    blocks.forEach(function(block) {
-		blockObjs[block._id] = block;
-	    });
-	    callback(undefined, blockObjs);
-	});
     };
 
     return store;    

@@ -163,7 +163,7 @@ def update_inputs(coin, update_spent=False):
                     print 'cannot find input tx %s for %s' % (tx_hash, tx['hash'])
         txcol.save(tx)
         d = time.time() - s
-        if d > 0.3:
+        if d > 1.0:
             print 's', d, tx['hash'], find_times
 
 def update_spent(coin):

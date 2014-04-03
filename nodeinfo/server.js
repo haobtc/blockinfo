@@ -17,50 +17,45 @@ app.use(function(err, req, res, next){
 
 function sendJSONP(req, res, obj) {
     if(req.query.callback && /^\w+$/.test(req.query.callback)) {
+	res.set('Content-Type', 'text/javascript');
 	res.send(req.query.callback + '(' + JSON.stringify(obj) + ');');
     } else {
 	res.send(obj);
     }
 }
 
-app.get('/api/v1/tx/:txHash', function(req, res) {
-    var d = Defer();
-    var childDefers = [];
-
+app.get('/api/v1/tx/details', function(req, res) {
+    var defer = Defer();
     function getTx(network) {
+	if(!req.query[network]) {
+	    return;
+	}
+	var hashList = req.query[network].split(',');
 	var store = mongoStore.stores[network];
-	var d1 = Defer();
-	childDefers.push(d1);
-	store.getTx(req.params.txHash, function(err, tx) {
-	    d1.avail(tx);
-	});
-    }
-
-    for(var network in mongoStore.stores) {
-	getTx(network);
-    }
-    d.wait(childDefers, {flatten: true});
-    d.then(function(results) {
-	var realTxes = [];
-	results.forEach(function(tx) {
-	    if(tx) {
-		realTxes.push(tx);
+	var d = Defer();
+	store.getTx(hashList, function(err, txes) {
+	    if(txes && txes.length > 0) {
+		d.avail.apply(null, txes);
 	    }
 	});
-	if(realTxes.length > 0) {
-	    res.send(realTxes[0]);
-	} else {
-	    res.send(null);
-	}
-    });
-});
+	return d;
+    }
 
-app.get('/api/v1/tx/:network/:txHash', function(req, res) {
-    var store = mongoStore.stores[req.params.network];
-    store.getTx(req.params.txHash, function(err, tx) {
-	tx = tx || null;
-	sendJSONP(req, res, tx);
-    });
+    var childDefers = [];
+    for(var network in mongoStore.stores) {
+	var d = getTx(network);
+	if(d) {
+	    childDefers.push(d);
+	}
+    }
+    if(childDefers.length > 0) {
+	defer.wait(childDefers, {flatten: true});
+	defer.then(function(results) {
+	    sendJSONP(req, res, results);
+	});
+    } else {
+	sendJSONP(req, res, []);
+    }
 });
 
 app.get('/api/v1/unspent', function(req, res){
@@ -118,10 +113,10 @@ var proxyWhiteList = {"sendrawtransaction": true,
 		      "getrawtransaction": true,
 		      "decoderawtransaction": true};
 app.post('/api/v1/proxy/:network', function(req, res) {
-    if(!proxyWhiteList[req.body.method]) {
+/*    if(!proxyWhiteList[req.body.method]) {
         res.send({error:"rpc not allowed", result:null});
         return;
-    }
+    } */
     var client = new RpcClient(Config.networks[req.params.network].rpcserver);
     client.rpc(req.body.method, req.body.params, function(err, btcres) {
 	if(err) {
