@@ -1,35 +1,24 @@
 var Defer = require('./defer');
-
-var coins = {
-    'bitcoin': {
-	'leadingChar': '1'
-    },
-    'litecoin': {
-	'leadingChar': 'L'
-    },
-    'dogecoin': {
-	'leadingChar': 'D'
-    }
-}
+var Config = require('./config');
 var MongoClient = require('mongodb').MongoClient;
 
 
 module.exports.stores = {};
 
 module.exports.initialize = function() {
-    for(var coin in coins) {
-	var store = Store(coin);
+    for(var network in Config.networks) {
+	var store = Store(network);
 	store.connect();
-	module.exports.stores[coin] = store;
+	module.exports.stores[network] = store;
     }
 };
 
 module.exports.getStoreByAddress = function(address) {
     var lead = address.substr(0, 1);
-    for(var coin in coins) {
-	var conf = coins[coin];
+    for(var network in Config.networks) {
+	var conf = Config.networks[network];
 	if(lead == conf.leadingChar) {
-	    return module.exports.stores[coin];
+	    return module.exports.stores[network];
 	}
     }
     return null;
@@ -39,17 +28,17 @@ module.exports.getStoreDict = function(addressList) {
     var storeDict = {};
     addressList.forEach(function(address) {
 	var lead = address.substr(0, 1);
-	for(var coin in coins) {
-	    var conf = coins[coin];
+	for(var network in Config.networks) {
+	    var conf = Config.networks[network];
 	    if(lead == conf.leadingChar) {
-		var s = storeDict[coin];
+		var s = storeDict[network];
 		if(s) {
 		    s.arr.push(address);
 		} else {
-		    storeDict[coin] = {
-			coin: coin,
+		    storeDict[network] = {
+			network: network,
 			arr: [address],
-			store: module.exports.stores[coin]
+			store: module.exports.stores[network]
 		    }
 		}
 	    }
@@ -59,11 +48,11 @@ module.exports.getStoreDict = function(addressList) {
 };
 
 
-function Store(coin) {
+function Store(network) {
     var store = {};
     var conn;
     store.connect = function() {
-	var url = "mongodb://localhost:27017/info_" + coin;
+	var url = "mongodb://localhost:27017/info_" + network;
 	MongoClient.connect(url, function(err, aConn) {
 	    if(err) {
 		console.error(err);

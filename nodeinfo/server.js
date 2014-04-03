@@ -1,11 +1,13 @@
 var Defer = require('./defer');
+var Config = require('./config');
+var RpcClient = require('./rpcclient');
 var express = require('express');
 var mongoStore = require('./mongostore');
 mongoStore.initialize();
 
 var app = express();
 
-app.use(express.urlencoded());
+app.use(express.bodyParser());
 app.use(app.router);
 app.use(express.static('public'));
 app.use(function(err, req, res, next){
@@ -21,12 +23,12 @@ function sendJSONP(req, res, obj) {
     }
 }
 
-app.get('/tx/:txHash', function(req, res) {
+app.get('/api/v1/tx/:txHash', function(req, res) {
     var d = Defer();
     var childDefers = [];
 
-    function getTx(coin) {
-	var store = mongoStore.stores[coin];
+    function getTx(network) {
+	var store = mongoStore.stores[network];
 	var d1 = Defer();
 	childDefers.push(d1);
 	store.getTx(req.params.txHash, function(err, tx) {
@@ -34,8 +36,8 @@ app.get('/tx/:txHash', function(req, res) {
 	});
     }
 
-    for(var coin in mongoStore.stores) {
-	getTx(coin);
+    for(var network in mongoStore.stores) {
+	getTx(network);
     }
     d.wait(childDefers, {flatten: true});
     d.then(function(results) {
@@ -53,20 +55,20 @@ app.get('/tx/:txHash', function(req, res) {
     });
 });
 
-app.get('/tx/:coin/:txHash', function(req, res) {
-    var store = mongoStore.stores[req.params.coin];
+app.get('/api/v1/tx/:network/:txHash', function(req, res) {
+    var store = mongoStore.stores[req.params.network];
     store.getTx(req.params.txHash, function(err, tx) {
 	tx = tx || null;
 	sendJSONP(req, res, tx);
     });
 });
 
-app.get('/unspent', function(req, res){
+app.get('/api/v1/unspent', function(req, res){
     var addressList = req.query.addresses.split(',');
     var storeDict = mongoStore.getStoreDict(addressList);
     
-    function getUnspent(coin) {
-	var s = storeDict[coin];
+    function getUnspent(network) {
+	var s = storeDict[network];
 	var d = Defer();
 	s.store.getUnspent(s.arr, function(err, outputs) {
 	    outputs = outputs || [];
@@ -81,14 +83,51 @@ app.get('/unspent', function(req, res){
 	return d;
     }
     var childDefers = [];
-    for(var coin in storeDict) {
-	var d = getUnspent(coin);
+    for(var network in storeDict) {
+	var d = getUnspent(network);
 	childDefers.push(d);
     }
     var defer = Defer();
     defer.wait(childDefers, {flatten: true});
     defer.then(function(outputs) {
 	sendJSONP(req, res, outputs);
+    });
+});
+
+
+// coin RPC proxies
+var jsonpWhiteList = {"sendrawtransaction": true,
+		      "getrawtransaction": true};
+app.get('/api/v1/rpc/:network/:command', function(req, res) {
+    if(!jsonpWhiteList[req.params.command]) {
+        res.send({error:"rpc not allowed", result:null});
+        return;
+    }
+    var client = new RpcClient(Config.networks[req.params.network].rpcserver);
+    var args = req.query.args || '[]';
+    client.rpc(req.params.command, JSON.parse(args), function(err, btcres) {
+	if(err) {
+	    console.error('error', err);
+	} 
+	sendJSONP(req, res, btcres.body);
+    });
+});
+
+var proxyWhiteList = {"sendrawtransaction": true,
+		      "getrawmempool": true,
+		      "getrawtransaction": true,
+		      "decoderawtransaction": true};
+app.post('/api/v1/proxy/:network', function(req, res) {
+    if(!proxyWhiteList[req.body.method]) {
+        res.send({error:"rpc not allowed", result:null});
+        return;
+    }
+    var client = new RpcClient(Config.networks[req.params.network].rpcserver);
+    client.rpc(req.body.method, req.body.params, function(err, btcres) {
+	if(err) {
+	    console.error('error', err);
+	} 
+	res.send(btcres.body);
     });
 });
 
