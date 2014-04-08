@@ -244,7 +244,7 @@ def main(coin):
                 b.height = height
                 height += 1
                 save_block(context.__coin__, b)
-                #update_inputs(context.__coin__)
+                update_inputs(context.__coin__, update_spent=False)
         except:
             import traceback
             traceback.print_exc()
