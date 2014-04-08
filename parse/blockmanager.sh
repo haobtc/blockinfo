@@ -1,6 +1,7 @@
 #!/bin/bash
 
 coin=$1
+dbhost=localhost
 
 case "$1" in
     bitcoin)
@@ -40,13 +41,12 @@ function calc_balance {
     mongo "info_$coin" jobs/cf_balance.js
 }
 
-function dbshell {
-    exec mongo "info_$coin"
-}
-
 case "$2" in
     dbshell)
-	dbshell
+	mongo -h $dbhost "info_$coin"
+	;;
+    dbdump)
+	mongodump -h $dbhost -d "info_$coin" -o "dbdump_$coin"
 	;;
     parse)
 	python blockparse.py $coin
@@ -70,6 +70,6 @@ case "$2" in
 	calc_balance
 	;;
     *)
-	echo Usage: $0 '<coin> [dbshell|parse|import_mempool|update_input|update_spent|calc_spent|calc_fee|calc_balance] args ...'
+	echo Usage: $0 '<coin> [dbshell|dbdump|parse|import_mempool|update_input|update_spent|calc_spent|calc_fee|calc_balance] args ...'
 	;;    
 esac
