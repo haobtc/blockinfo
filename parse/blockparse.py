@@ -225,7 +225,7 @@ class DTCParserContext(ParserContext):
     __address_version__ = '\x1e'
     __magic__ = 0xc0c0c0c0
 
-def main(coin):
+def blocks(coin):
     init_connect(coin)
     ContextClasses = [ParserContext, LTCParserContext, DTCParserContext]
     ContextClass = [cls for cls in ContextClasses if cls.__coin__ == coin][0]
@@ -243,12 +243,16 @@ def main(coin):
             for b in context.parseBlocks(offset=offset):
                 b.height = height
                 height += 1
-                save_block(context.__coin__, b)
-                update_inputs(context.__coin__, update_spent=False)
+                yield b, context
         except:
             import traceback
             traceback.print_exc()
             raise
+
+def main(coin):
+    for b, context in blocks(coin):
+        save_block(context.__coin__, b)
+        update_inputs(context.__coin__, update_spent=False)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
