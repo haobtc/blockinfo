@@ -10,9 +10,9 @@ rpc_id = 0
 def coinrpc(coin, rpcmethod, *params):
     global rpc_id
     rpc_id += 1
-    href = 'http://localhost:18080/api/v1/proxy/%s' % coin
+    href = 'http://block.so/infoapi/v1/rpc/%s' % coin
     parsed = urlparse.urlparse(href)
-    rpc_server = '%s://%s:%s%s' % (parsed.scheme, parsed.hostname, parsed.port, parsed.path)
+    rpc_server = '%s://%s%s' % (parsed.scheme, parsed.netloc, parsed.path)
     req = httplib2.Http(timeout=5)
     req.add_credentials(parsed.username,
                         parsed.password)

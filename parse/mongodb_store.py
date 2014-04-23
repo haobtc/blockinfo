@@ -23,11 +23,11 @@ def init_connect(coin):
     col.ensure_index('height')
     col.ensure_index([('data_index', -1), ('offset', -1)])
 
-
     col = db['tx']
     col.ensure_index('hash', unique=True)
     col.ensure_index('outputs.address')
     col.ensure_index('inputs.address')
+    col.ensure_index('block_id')
 
     col = db['iterCursor']
     col.ensure_index('name', unique=True)
@@ -35,12 +35,20 @@ def init_connect(coin):
     col = db['mempool']
     col.ensure_index('txid', unique=True)
     col.ensure_index('vout.scriptPubKey.addresses')
+    print 'ensure indices ok'
 
 def get_last_pos(coin):
     db = dbconn(coin)
     col = db['block']
     b = col.find_one(sort=[('data_index', DESCENDING), ('offset', DESCENDING)])
     if b:
+        if not b.get('saved'):
+            print 'last block is not propertly saved'
+            txcol = db['tx']
+            txcol.remove({'block_id': b['_id']})
+            col.remove({'_id': b['_id']})
+            return get_last_pos(coin)
+            
         return b['data_index'], b['offset'], b['height']
     return 0, 0, 0
 
@@ -55,11 +63,17 @@ def save_block(coin, b):
             'height': b.height,
             'prev_hash': b.prevHash,
             'byte_size': b.size + 8,
-            'blk_time': b.blkTime
+            'blk_time': b.blkTime,
+            'saved': False
             })
     
     for i, tx in enumerate(b.txes):
         save_tx(coin, tx, blockId, i)
+
+    col.find_and_modify(query={'_id': blockId},
+                        update={'$set': {'saved': True}},
+                        upsert=False)
+    print 'block', blockId, 'saved'
 
 def save_tx(coin, tx, blockId, block_index):
     db = dbconn(coin)
@@ -104,8 +118,11 @@ def each_tx(coin, iter_name, limit=-1, c=1):
             params = {'_id': {'$gt': last_objid}}
         else:
             params = None
-                
-        for tx in txcol.find(spec=params, limit=c):
+        txlist = list(txcol.find(spec=params, limit=c))
+        if not txlist:
+            cont = False
+            continue
+        for tx in txlist:
             last_objid = tx['_id']
             yield tx
             times += 1
@@ -134,9 +151,8 @@ def is_valid_hash(tx_hash):
 
 def update_inputs(coin, update_spent=False):
     txcol = dbconn(coin)['tx']
-
     for i, tx in enumerate(each_tx(coin, 'input', c=100)):
-        if i % 1000 == 0:
+        if i % 1000 == 0 and i != 0:
             print time.strftime('%H:%M:%S'), i
         s = time.time()
         find_times = 0
@@ -202,7 +218,8 @@ def import_mempool(coin):
         print 'get', txid
         try:
             rawtx = coinrpc(coin, 'getrawtransaction', txid)['result']
-            print 'rawtx length', len(rawtx)
+            if rawtx:
+                print 'rawtx length', len(rawtx)
             time.sleep(1)
 
             tx = coinrpc(coin, 'decoderawtransaction', rawtx)['result']
@@ -211,7 +228,7 @@ def import_mempool(coin):
             break
         if tx:
             col.insert(tx)
-        time.sleep(3)
+        time.sleep(1.0)
 
 if __name__ == '__main__':
     update_spent('bitcoin')

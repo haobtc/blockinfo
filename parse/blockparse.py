@@ -3,6 +3,7 @@ import re
 import sys
 import time
 from struct import unpack
+import ltc_scrypt
 import mmap
 from hashlib import sha256
 from bitcointools.deserialize import decode_script, extract_public_key
@@ -90,8 +91,10 @@ class ParserContext(object):
     def __init__(self, dataIndex, height=0):
         self.height = height
         self.dataIndex = dataIndex
+        home = os.getenv('COIN_USER_HOME', os.getenv('HOME', '/home/zengke'))
         self.fileName = os.path.join(
-            os.getenv('HOME'),
+            #os.getenv('HOME'),
+            home,
             '.%s/blocks/blk%05d.dat' % (self.__coin__, self.dataIndex))
 
     def ahead(self, cntBytes):
@@ -170,7 +173,7 @@ class ParserContext(object):
                 output.address = ''
             outputs.append(output)
         return outputs
-    
+
     def parseTx(self):
         startPos = self.pos
         (version,) = unpack('I', self.ahead(4))
@@ -187,6 +190,9 @@ class ParserContext(object):
         tx.hash = tohex(tx.hash)
         return tx
 
+    def getBlockHash(self, b):
+        return dhash(b)
+
     def parseBlock(self):
         b = Block()
         b.dataIndex = self.dataIndex
@@ -201,7 +207,7 @@ class ParserContext(object):
             print 'size', b.size
             raise EndOfData()
 
-        b.hash = tohex(dhash(self.mm[self.pos:self.pos+80]))
+        b.hash = tohex(self.getBlockHash(self.mm[self.pos:self.pos+80]))
         (version, b.prevHash, b.merkleRootHash, 
          b.blkTime, blkBits, blkNonce) = unpack('I32s32sIII',
                                               self.ahead(80))
@@ -220,16 +226,22 @@ class LTCParserContext(ParserContext):
     __address_version__ = '\x30'
     __magic__ = 0xdbb6c0fb
 
-class DTCParserContext(ParserContext):
+    def getBlockHash(self, b):
+        return ltc_scrypt.getPoWHash(b)
+
+class DTCParserContext(LTCParserContext):
     __coin__ = 'dogecoin'
     __address_version__ = '\x1e'
     __magic__ = 0xc0c0c0c0
 
-def blocks(coin):
+def blocks(coin, start_pos=None):
     init_connect(coin)
     ContextClasses = [ParserContext, LTCParserContext, DTCParserContext]
     ContextClass = [cls for cls in ContextClasses if cls.__coin__ == coin][0]
-    file_id, file_pos, height = get_last_pos(ContextClass.__coin__)
+    if start_pos is None:
+        file_id, file_pos, height = get_last_pos(ContextClass.__coin__)
+    else:
+        file_id, file_pos, height = start_pos
     print 'last position', file_id, file_pos, height
 
     for i in xrange(file_id, file_id + 200):
@@ -251,8 +263,8 @@ def blocks(coin):
 
 def main(coin):
     for b, context in blocks(coin):
-        save_block(context.__coin__, b)
-        update_inputs(context.__coin__, update_spent=False)
+        save_block(coin, b)
+        update_inputs(coin, update_spent=True)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

@@ -7,6 +7,23 @@ mongoStore.initialize();
 
 var app = express();
 
+var allowCrossDomain = function(req, res, next) {  
+    // if the origin was not passed.  
+    var origin = (req.headers.origin || "*");  
+    
+    res.header('Access-Control-Allow-Credentials', true);  
+    res.header('Access-Control-Allow-Origin', origin);  
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');  
+    res.header('Access-Control-Allow-Headers', 'Set-Cookie, X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Origin, Referer, User-Agent');  
+    
+    if ("OPTIONS" == req.method) {  
+        res.send(200);  
+    } else {  
+        next();  
+    }  
+};  
+app.use(allowCrossDomain);
+
 app.use(express.bodyParser());
 app.use(app.router);
 app.use(express.static('public'));
@@ -24,7 +41,7 @@ function sendJSONP(req, res, obj) {
     }
 }
 
-app.get('/api/v1/tx/details', function(req, res) {
+app.get('/infoapi/v1/tx/details', function(req, res) {
     var defer = Defer();
     function getTx(network) {
 	if(!req.query[network]) {
@@ -34,9 +51,13 @@ app.get('/api/v1/tx/details', function(req, res) {
 	var store = mongoStore.stores[network];
 	var d = Defer();
 	store.getTx(hashList, function(err, txes) {
-	    if(txes && txes.length > 0) {
+	    txes = txes || [];
+	    store.getTxFromMempool(hashList, function(err, txesInMemPool) {
+		txesInMemPool.forEach(function(tx) {
+		    txes.push(tx);
+		});
 		d.avail.apply(null, txes);
-	    }
+	    });
 	});
 	return d;
     }
@@ -58,7 +79,11 @@ app.get('/api/v1/tx/details', function(req, res) {
     }
 });
 
-app.get('/api/v1/unspent', function(req, res){
+app.get('/infoapi/v1/unspent', function(req, res){
+    if(!req.query.addresses) {
+	res.send([]);
+	return;
+    }
     var addressList = req.query.addresses.split(',');
     var storeDict = mongoStore.getStoreDict(addressList);
     
@@ -66,13 +91,30 @@ app.get('/api/v1/unspent', function(req, res){
 	var s = storeDict[network];
 	var d = Defer();
 	s.store.getUnspent(s.arr, function(err, outputs) {
+	    if(err) {
+		console.error(err);
+		d.avail();
+		return;
+	    }
 	    outputs = outputs || [];
-	    s.store.getMempool(s.arr, function(err, outputsInMemPool) {
-		// FIXME: handle err
-		outputsInMemPool.forEach(function(tx) {
-		    outputs.push(tx);
+	    s.store.getUnspentFromMempool(s.arr, function(err, outputsInMemPool, spentInMemPool) {
+		if(err) {
+		    console.error(err);
+		    d.avail();
+		    return;
+		}
+		var unspentOutputs = [];
+		outputs.forEach(function(output) {
+		    if(!spentInMemPool[output.txid + ':' + output.vout]) {
+			unspentOutputs.push(output);
+		    }
 		});
-		d.avail.apply(null, outputs);
+		outputsInMemPool.forEach(function(output) {
+		    if(!spentInMemPool[output.txid + ':' + output.vout]) {
+			unspentOutputs.push(output);
+		    }
+		});
+		d.avail.apply(null, unspentOutputs);
 	    });
 	});
 	return d;
@@ -89,41 +131,61 @@ app.get('/api/v1/unspent', function(req, res){
     });
 });
 
-
-// coin RPC proxies
-var jsonpWhiteList = {"sendrawtransaction": true,
-		      "getrawtransaction": true};
-app.get('/api/v1/rpc/:network/:command', function(req, res) {
-    if(!jsonpWhiteList[req.params.command]) {
+var proxyWhiteList = {"getbalance": true, "sendrawtransaction": true,
+		      "getrawmempool": true,
+		      "getrawtransaction": true,
+		      "decoderawtransaction": true};
+app.post('/infoapi/v1/rpc/:network', function(req, res) {
+    if(!proxyWhiteList[req.body.method]) {
         res.send({error:"rpc not allowed", result:null});
         return;
     }
     var client = new RpcClient(Config.networks[req.params.network].rpcserver);
-    var args = req.query.args || '[]';
-    client.rpc(req.params.command, JSON.parse(args), function(err, btcres) {
+    client.rpc(req.body.method, req.body.params, function(err, btcres) {
 	if(err) {
-	    console.error('error', err);
-	} 
-	sendJSONP(req, res, btcres.body);
+	    console.error('error on request rpc', err);
+	    res.send({error: err.message, result: null});
+	} else {
+	    res.send(btcres.body);
+	}
     });
 });
 
-var proxyWhiteList = {"sendrawtransaction": true,
-		      "getrawmempool": true,
-		      "getrawtransaction": true,
-		      "decoderawtransaction": true};
-app.post('/api/v1/proxy/:network', function(req, res) {
-/*    if(!proxyWhiteList[req.body.method]) {
-        res.send({error:"rpc not allowed", result:null});
-        return;
-    } */
+app.post('/infoapi/v1/sendtx/:network', function(req, res) {
     var client = new RpcClient(Config.networks[req.params.network].rpcserver);
-    client.rpc(req.body.method, req.body.params, function(err, btcres) {
+    client.rpc('sendrawtransaction', [req.body.rawtx], function(err, txres) {
 	if(err) {
-	    console.error('error', err);
-	} 
-	res.send(btcres.body);
-    });
+	    console.error('error on send raw transaction', err);
+	    res.send({error: err.message, result: null});
+	    return;
+	}
+	client.rpc('decoderawtransaction', [req.body.rawtx], function(err, txres) {
+	    if(err) {
+		console.error('error on decode raw transaction', err);
+		res.send({error: err.message, result: null});
+		return;
+	    }
+	    if(txres.body.result.txid) {
+		var store = mongoStore.stores[req.params.network];
+		store.addMempool(txres.body.result, function(err, tx) {
+		    if(err) {
+			console.error('error on adding mempool', err);
+			res.send({error:err.mesage, result: null});
+			return;
+		    }
+		    res.send(txres.body);
+		});
+	    } else {
+		res.send({error: 'no txid', result: txres.body});
+	    }
+	}); // end of decoderawtransaction
+    }); // end of sendrawtransaction
+});
+
+
+
+app.get('/', function(req, res) {
+    res.send('Your home');
 });
 
 module.exports.httpServer = app;

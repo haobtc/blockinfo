@@ -10,7 +10,6 @@ function RpcClient(href, opts) {
 
 RpcClient.prototype.rpc = function(method, params, callback) {
     this.request({jsonrpc: '2.0', method: method, params: params}, function(err, body) {
-
 	callback(err, body);
     });
 };
@@ -25,9 +24,13 @@ RpcClient.prototype.batch = function(cmds, callback) {
 RpcClient.prototype.request = function(payload, callback) {
     request(
 	{uri: this.url.href, method: 'POST', json: payload, timeout:15000},
-        function (error, response, body) {
-	    callback(error, {status:response.statusCode, 
-			     body: body});
+        function (err, response, body) {
+	    if(err) {
+		callback(err);
+		return;
+	    }
+	    callback(undefined, {status:response.statusCode, 
+				 body: body});
 	});
 };
 

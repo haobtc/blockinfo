@@ -19,5 +19,6 @@
 		     "rpcserver": "http://dogecoinrpc:pass@localhost:28655"
 		    }
 
-    }
+    },
+    httpPort: 18080
 }

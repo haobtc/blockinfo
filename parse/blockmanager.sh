@@ -2,6 +2,7 @@
 
 coin=$1
 dbhost=localhost
+prog=$0
 
 case "$1" in
     bitcoin)
@@ -21,7 +22,7 @@ function import_mempool {
 }
 
 function update_input {
-    python -c "import mongodb_store; mongodb_store.update_inputs('$coin', update_spent=False)"
+    python -c "import mongodb_store; mongodb_store.update_inputs('$coin', update_spent=True)"
 }
 
 function update_spent {
@@ -29,24 +30,45 @@ function update_spent {
 }
 
 function calc_spent {
-    mongo "info_$coin" jobs/cf_spent.js
+    mongo "$dbhost/info_$coin" jobs/cf_spent.js
 }
 
 function calc_fee {
-    mongo "info_$coin" jobs/cf_fee.js
+    mongo "$dbhost/info_$coin" jobs/cf_fee.js
 }
 
 
 function calc_balance {
-    mongo "info_$coin" jobs/cf_balance.js
+    mongo "${dbhost}/info_$coin" jobs/cf_balance.js
+}
+
+function job {
+    $prog $coin parse && \
+    $prog $coin calc_balance && \
+    $prog $coin calc_fee && \
+    $prog $coin import_mempool &&  \
+    sleep 5
+}
+
+function simple_job {
+    $prog $coin parse && \
+    $prog $coin import_mempool &&  \
+    sleep 5
 }
 
 case "$2" in
+    job)
+	job
+	;;
+    simple_job)
+	simple_job
+	;;
     dbshell)
-	mongo -h $dbhost "info_$coin"
+	mongo "${dbhost}/info_$coin"
 	;;
     dbdump)
-	mongodump -h $dbhost -d "info_$coin" -o "dbdump_$coin"
+	mkdir -p dbdump
+	mongodump -h $dbhost -d "info_$coin" -o "dbdump/$coin"
 	;;
     parse)
 	python blockparse.py $coin
@@ -70,6 +92,6 @@ case "$2" in
 	calc_balance
 	;;
     *)
-	echo Usage: $0 '<coin> [dbshell|dbdump|parse|import_mempool|update_input|update_spent|calc_spent|calc_fee|calc_balance] args ...'
+	echo Usage: $0 '<coin> [dbshell|dbdump|parse|import_mempool|update_input|update_spent|calc_spent|calc_fee|calc_balance|job|simple_job] args ...'
 	;;    
 esac

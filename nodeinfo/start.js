@@ -1,5 +1,6 @@
 var argv = require('optimist').argv;
 var server = require('./server');
+var Config = require('./config');
 
 var domain = require('domain').create();
 domain.on('error', function(err) {
@@ -7,5 +8,7 @@ domain.on('error', function(err) {
 });
 
 domain.run(function() {
-    server.httpServer.listen(18080);
+    var port = argv.p || Config.httpPort || 18080;
+    console.info('server starts at port', port);
+    server.httpServer.listen(port);
 });

@@ -1,7 +1,8 @@
 var Defer = require('./defer');
 var Config = require('./config');
-var MongoClient = require('mongodb').MongoClient;
-
+var mongodb = require('mongodb');
+var MongoClient = mongodb.MongoClient;
+var Long = mongodb.Long;
 
 module.exports.stores = {};
 
@@ -98,11 +99,35 @@ function Store(network) {
 	});
     };    
 
+    store.getTxFromMempool = function(hashList, callback) {
+	var col = conn.collection('mempool');
+	col.find({txid: {$in: hashList}}).toArray(function(err, arr) {
+	    var txes = [];
+	    arr.forEach(function(tx) {
+		var nbObj = {
+		    network: network,
+		    txid: tx.txid,
+		    blocktime: 0,
+		    time: tx._id.getTimestamp().getTime()/1000,
+		    blockhash: 'not_in_block',
+		    blockindex: 0,
+		    confirmations: 0
+		};
+		txes.push(nbObj);
+	    });
+	    callback(undefined, txes);
+	});
+    };
+
     store.getTx = function(hashList, callback) {
 	var col = conn.collection('tx');
 	col.find({hash: {$in: hashList}}).toArray(function(err, arr) {
 	    if(err) {
 		callback(err, undefined);
+		return;
+	    }
+	    if(arr.length == 0) {
+		callback(undefined, []);
 		return;
 	    }
 	    getBlocks(arr, function(err, blockObjs) {
@@ -123,28 +148,32 @@ function Store(network) {
 		    var outputs = [];
 		    tx.inputs.forEach(function(input) {
 			if(input.address) {
-			    sumInput += input.value;
+			    var v = input.value/100000000;
+			    sumInput += v;
 			    inputs.push({
 				address:input.address,
-			        value:input.value/100000000,
+			        value:v,
 				vout: input.output_index,
 				txid: input.output_tx_hash
 			    });
 			}
 		    });
 		    tx.outputs.forEach(function(output) {
-			sumOutput += output.value;
+			var v = output.value/100000000;
+			sumOutput += v;
 			outputs.push({
 			    address:output.address,
-			    value:output.value/100000000
+			    value:v
 			});
 		    });
 		    nbObj.inputs = inputs;
 		    nbObj.outputs = outputs;
-		    nbObj.fee = (sumInput - sumOutput)/ 100000000;
+		    nbObj.fee = sumInput - sumOutput
 		    nbObj.amount = sumInput;
 		    if(latestBlock) {
-			nbObj.confirmations = latestBlock.height - block.height;
+			nbObj.confirmations = 1 + Math.max(0, latestBlock.height - block.height);
+		    } else {
+			nbObj.confirmations = 0;
 		    }
 		    txes.push(nbObj);
 		});
@@ -154,18 +183,14 @@ function Store(network) {
 	});
     };
 
-    store.getMempool = function(addressList, callback) {
-	var query = {};
-	if(typeof addressList == 'string') {
-	    query = {"vout.scriptPubKey.addresses": addressList};
-	} else if (addressList.length == 1) {
-	    query = {"vout.scriptPubKey.addresses": addressList[0]};
-	} else if(addressList.length == 0) {
-	    callback(undefined, []);
+
+    store.getUnspentFromMempool = function(addressList, callback) {
+	if(addressList.length == 0) {
+	    callback(undefined, [], {});
 	    return;
-	} else {
-	    query = {"vout.scriptPubKey.addresses": {$in: addressList}};
 	}
+
+	var query = {"vout.scriptPubKey.addresses": {$in: addressList}};
 	var addrDict = {};
 	addressList.forEach(function(addr) {
 	    addrDict[addr] = true;
@@ -174,43 +199,45 @@ function Store(network) {
 	var col = conn.collection('mempool');
 	col.find(query).toArray(function(err, arr) {
 	    if(err) {
-		callbvack(err, undefined);
+		callbvack(err, undefined, undefined);
 		return;
 	    }
 	    var outputs = [];
+	    var spent = {};
 	    arr.forEach(function(tx){
 		tx.vout.forEach(function(output) {
 		    var scriptPubKey = output.scriptPubKey;
-		    scriptPubKey.forEach(function(address) {
-			if(addrDict[address]) {
-			    var obj = {
-				address: address,
-				vout:scriptPubKey.n,
-				amount: output.value,
-				scriptPubKey: scriptPubKey.hex,
-				txid: tx.txid
-			    };
-			    outputs.push(obj);
-			}
-		    });
+		    if(scriptPubKey) {
+			scriptPubKey.addresses.forEach(function(address) {
+			    if(addrDict[address]) {
+				var obj = {
+				    network: network,
+				    address: address,
+				    vout:output.n,
+				    amount: output.value,
+				    scriptPubKey: scriptPubKey.hex,
+				    txid: tx.txid,
+				    confirmations: 0
+				};
+				outputs.push(obj);
+			    }
+			});
+		    }
+		});
+		tx.vin.forEach(function(input) {
+		    spent[input.txid + ':' + input.vout] = true;
 		});
 	    });
-	    callback(undefined, outputs);
+	    callback(undefined, outputs, spent);
 	});
     };
 
     store.getUnspent = function(addressList, callback) {
-	var query = {};
-	if(typeof addressList == 'string') {
-	    query = {"outputs.address": addressList};
-	} else if (addressList.length == 1) {
-	    query = {"outputs.address": addressList[0]};
-	} else if(addressList.length == 0) {
+	if(addressList.length == 0) {
 	    callback(undefined, []);
 	    return;
-	} else {
-	    query = {"outputs.address": {$in: addressList}};
 	}
+	var query = {"outputs.address": {$in: addressList}};
 	var addrDict = {};
 	addressList.forEach(function(addr) {
 	    addrDict[addr] = true;
@@ -234,7 +261,7 @@ function Store(network) {
 				vout: index,
 				amount: output.value/100000000,
 				txid: tx.hash,
-				scriptPubkey: output.script.toString('hex')
+				scriptPubKey: output.script.toString('hex')
 			    };
 			    if(latestBlock) {
 				obj.confirmations = latestBlock.height - block.height;
@@ -246,6 +273,11 @@ function Store(network) {
 		callback(undefined, outputs);
 	    });
 	});	
+    };
+
+    store.addMempool = function(tx, callback) {
+	var col = conn.collection('mempool');
+	col.insert(tx, callback);
     };
 
     return store;    
