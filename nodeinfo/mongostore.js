@@ -4,6 +4,10 @@ var mongodb = require('mongodb');
 var MongoClient = mongodb.MongoClient;
 var Long = mongodb.Long;
 
+function round(v, shift) {
+    return Math.round(v * Math.pow(10, shift))/ Math.pow(10, shift);
+}
+
 module.exports.stores = {};
 
 module.exports.initialize = function() {
@@ -168,8 +172,8 @@ function Store(network) {
 		    });
 		    nbObj.inputs = inputs;
 		    nbObj.outputs = outputs;
-		    nbObj.fee = sumInput - sumOutput
-		    nbObj.amount = sumInput;
+		    nbObj.fee = round(sumInput - sumOutput, 8);
+		    nbObj.amount = round(sumInput, 8);
 		    if(latestBlock) {
 			nbObj.confirmations = 1 + Math.max(0, latestBlock.height - block.height);
 		    } else {

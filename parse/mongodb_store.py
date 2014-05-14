@@ -205,16 +205,17 @@ def import_mempool(coin):
     if not txids:
         return
     col = dbconn(coin)['mempool']
-    #print col.remove({'txid': {'$not': {'$in': txids}}})
+    col.remove({'txid': {'$nin': txids}})
     existing_txids = {}
     for tx in col.find({'txid': {'$in': txids}}):
         existing_txids[tx['txid']] = 1
 
+    new_tx_times = 0
     for i, txid in enumerate(txids):
         if txid in existing_txids:
             print 'ext', txid
             continue
-
+        
         print 'get', txid
         try:
             rawtx = coinrpc(coin, 'getrawtransaction', txid)['result']
@@ -228,7 +229,11 @@ def import_mempool(coin):
             break
         if tx:
             col.insert(tx)
-        time.sleep(1.0)
+        new_tx_times += 1
+        if new_tx_times >= 50:
+            break
+        time.sleep(0.5)
 
 if __name__ == '__main__':
-    update_spent('bitcoin')
+    #update_spent('bitcoin')
+    import_mempool('bitcoin')

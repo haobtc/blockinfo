@@ -41,13 +41,18 @@ function sendJSONP(req, res, obj) {
     }
 }
 
-app.get('/infoapi/v1/tx/details', function(req, res) {
+function getTxDetails(req, res) {
     var defer = Defer();
+    var query = req.query;
+    if(req.method == 'POST') {
+	query = req.body;
+    }
+
     function getTx(network) {
-	if(!req.query[network]) {
+	if(!query[network]) {
 	    return;
 	}
-	var hashList = req.query[network].split(',');
+	var hashList = query[network].split(',');
 	var store = mongoStore.stores[network];
 	var d = Defer();
 	store.getTx(hashList, function(err, txes) {
@@ -77,14 +82,22 @@ app.get('/infoapi/v1/tx/details', function(req, res) {
     } else {
 	sendJSONP(req, res, []);
     }
-});
+}
 
-app.get('/infoapi/v1/unspent', function(req, res){
-    if(!req.query.addresses) {
+app.get('/infoapi/v1/tx/details', getTxDetails);
+app.post('/infoapi/v1/tx/details', getTxDetails);
+
+function getUnspentList(req, res){
+    var query = req.query;
+    if(req.method == 'POST') {
+	query = req.body;
+    }
+    if(!query.addresses) {
 	res.send([]);
 	return;
     }
-    var addressList = req.query.addresses.split(',');
+
+    var addressList = query.addresses.split(',');
     var storeDict = mongoStore.getStoreDict(addressList);
     
     function getUnspent(network) {
@@ -129,7 +142,10 @@ app.get('/infoapi/v1/unspent', function(req, res){
     defer.then(function(outputs) {
 	sendJSONP(req, res, outputs);
     });
-});
+}
+
+app.get('/infoapi/v1/unspent', getUnspentList);
+app.post('/infoapi/v1/unspent', getUnspentList);
 
 var proxyWhiteList = {"getbalance": true, "sendrawtransaction": true,
 		      "getrawmempool": true,
